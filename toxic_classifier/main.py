@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime
 import json
 
-def load_and_prepare_data(file_path, sample_size=1000):
+def load_and_prepare_data(file_path, sample_size=5000):
     """Load and prepare data with improved sampling and validation"""
     # Load the toxic comments dataset
     df = pd.read_csv(file_path)
@@ -20,21 +20,21 @@ def load_and_prepare_data(file_path, sample_size=1000):
     def get_toxicity_level(row):
         # Define weights for different types of toxicity
         weights = {
-            'severe_toxic': 2.5,  # Reduced weight
-            'toxic': 1.0,         # Reduced weight
-            'obscene': 1.0,       # Same weight
-            'threat': 2.0,        # Reduced weight
-            'insult': 1.5,        # Increased weight for insults
-            'identity_hate': 2.0   # Reduced weight
+            'severe_toxic': 2.0,  # Reduced weight
+            'toxic': 1.0,         # Base weight
+            'obscene': 1.0,       # Base weight
+            'threat': 2.0,        # Base weight
+            'insult': 2.0,        # Increased weight for insults
+            'identity_hate': 2.0   # Base weight
         }
         
         # Calculate weighted score
         score = sum(row[col] * weights[col] for col in weights.keys())
         
         # Classify based on weighted score with adjusted thresholds
-        if score >= 2.5 or row['severe_toxic'] == 1:  # Lower threshold for high toxicity
+        if score >= 2.0 or row['severe_toxic'] == 1:  # Lower threshold for high toxicity
             return 'high'
-        elif score >= 1.0 or row['toxic'] == 1 or row['insult'] == 1:  # Lower threshold for moderate
+        elif score >= 0.8 or row['toxic'] == 1 or row['insult'] == 1:  # Lower threshold for moderate
             return 'moderate'
         else:
             return 'low'
@@ -69,7 +69,7 @@ def main():
         else:
             print("No existing model found. Starting training...")
             # Load and prepare the data with balanced sample
-            texts, labels = load_and_prepare_data('./train.csv', sample_size=1000)
+            texts, labels = load_and_prepare_data('./train.csv', sample_size=5000)
             
             # Split the data with stratification
             train_texts, val_texts, train_labels, val_labels = train_test_split(
@@ -80,17 +80,17 @@ def main():
             print("Learning counterfactual patterns...")
             classifier.learn_counterfactual_patterns(train_texts, train_labels)
             
-            # Train the model with optimized parameters for speed
+            # Train the model with optimized parameters
             print("Training the model...")
             training_metrics = classifier.train(
                 train_texts,
                 train_labels,
                 val_texts,
                 val_labels,
-                batch_size=64,
-                epochs=4,
-                learning_rate=3e-5,
-                patience=2
+                batch_size=32,      # Reduced batch size
+                epochs=10,          # Increased epochs
+                learning_rate=2e-5, # Adjusted learning rate
+                patience=3          # Increased patience
             )
             
             # Save training metrics

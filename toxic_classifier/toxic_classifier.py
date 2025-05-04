@@ -342,6 +342,16 @@ class ToxicClassifier:
             if text.lower() in simple_greetings:
                 return 'low', [0.8, 0.1, 0.1]
             
+            # Check for common non-toxic phrases
+            non_toxic_phrases = [
+                'thank you', 'thanks', 'please', 'excuse me', 'sorry',
+                'i appreciate', 'i understand', 'i agree', 'i see',
+                'that makes sense', 'good point', 'interesting',
+                'i think', 'in my opinion', 'from my perspective'
+            ]
+            if any(phrase in text.lower() for phrase in non_toxic_phrases):
+                return 'low', [0.7, 0.2, 0.1]
+            
             # Tokenize and prepare input
             encoding = self.tokenizer.encode_plus(
                 text,
@@ -365,13 +375,13 @@ class ToxicClassifier:
                 probabilities = [float(p) for p in predictions[0].tolist()]
 
             # Define thresholds for toxicity levels
-            high_threshold = 0.4    # Lower threshold for high toxicity
-            moderate_threshold = 0.3 # Lower threshold for moderate toxicity
+            high_threshold = 0.35    # Lower threshold for high toxicity
+            moderate_threshold = 0.25 # Lower threshold for moderate toxicity
             
             # Determine toxicity level based on probabilities
             if probabilities[2] >= high_threshold:  # High toxicity
                 level = 'high'
-            elif probabilities[1] >= moderate_threshold or probabilities[2] >= 0.25:  # Moderate toxicity
+            elif probabilities[1] >= moderate_threshold or probabilities[2] >= 0.2:  # Moderate toxicity
                 level = 'moderate'
             else:  # Low toxicity
                 level = 'low'
@@ -451,19 +461,27 @@ class ToxicClassifier:
                 # Convert to lowercase for comparison but preserve original case
                 word_lower = word.lower()
                 
-                # Check context-aware replacements
-                replacement = None
-                if word_lower in self.context_replacements:
-                    context = self.context_replacements[word_lower]
-                    # Check if next word matches context
-                    if i < len(words) - 1:
-                        next_word = words[i + 1].lower().strip('!,.?')
-                        if next_word in context['after']:
-                            replacement = context['replacement']
+                # Check if the word is being used as an insult
+                is_insult = False
+                if word_lower in self.semantic_mappings:
+                    # Check context - if it's being used to address someone
+                    if i > 0 and words[i-1].lower() in ['you', 'your', 'youre', 'you\'re']:
+                        is_insult = True
+                    # Check if it's a direct address
+                    elif i == 0 and len(words) > 1 and words[1].lower() in ['are', 'were', 'was', 'is']:
+                        is_insult = True
                 
-                # If no context match, check regular mappings
-                if not replacement and word_lower in self.semantic_mappings:
-                    replacement = self.semantic_mappings[word_lower]
+                # Get replacement based on context
+                replacement = None
+                if is_insult:
+                    # Use more neutral replacements for insults
+                    if word_lower in self.semantic_mappings:
+                        replacement = self.semantic_mappings[word_lower]
+                        # Add context-aware modifications
+                        if 'person' in replacement or 'individual' in replacement:
+                            replacement = 'someone with a different perspective'
+                        elif 'incorrect' in replacement:
+                            replacement = 'have a different understanding'
                 
                 if replacement:
                     # Preserve original capitalization
@@ -491,30 +509,10 @@ class ToxicClassifier:
             
         except Exception as e:
             print(f"Error in counterfactual generation: {str(e)}")
-            # Fallback to simple word replacement
-            try:
-                words = text.split()
-                result = []
-                changes = []
-                for word in words:
-                    word_lower = word.lower().strip('!,.?')
-                    if word_lower in self.semantic_mappings:
-                        replacement = self.semantic_mappings[word_lower]
-                        if word[0].isupper():
-                            replacement = replacement.capitalize()
-                        result.append(replacement)
-                        changes.append(f"{word} -> {replacement}")
-                    else:
-                        result.append(word)
-                return {
-                    'text': ' '.join(result),
-                    'changes': changes
-                }
-            except:
-                return {
-                    'text': text,
-                    'changes': []
-                }
+            return {
+                'text': text,
+                'changes': []
+            }
 
     def train(self, train_texts, train_labels, val_texts=None, val_labels=None,
               batch_size=16, epochs=3, learning_rate=2e-5, patience=3):
