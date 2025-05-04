@@ -102,11 +102,11 @@ class ToxicClassifier:
             'aggressive': 'assertive',
             
             # Personal attacks and insults
-            'idiot': 'person',
-            'stupid': 'incorrect',
-            'moron': 'individual',
-            'dumb': 'mistaken',
-            'fool': 'someone',
+            'idiot': 'person with a different perspective',
+            'stupid': 'person with a different understanding',
+            'moron': 'person with a different viewpoint',
+            'dumb': 'person with a different approach',
+            'fool': 'person with a different way of thinking',
             'jerk': 'person',
             'asshole': 'individual',
             'retard': 'person',
@@ -189,23 +189,23 @@ class ToxicClassifier:
             'fuckgirl': 'person'
         }
         
-        # Phrase-level mappings with more meaningful replacements
+        # Enhanced phrase-level mappings with more meaningful replacements
         self.phrase_mappings = {
-            # Personal attacks with constructive alternatives
-            'you are mad': 'you seem upset',
-            'you are angry': 'you seem upset',
+            # Direct insults with constructive alternatives
+            'you idiot': 'you have a different perspective',
+            'you are idiot': 'you have a different perspective',
             'you are an idiot': 'you have a different perspective',
-            'what an idiot': 'what a different viewpoint',
-            'complete idiot': 'person with a different approach',
-            'total idiot': 'person with a different perspective',
+            'you stupid': 'you have a different understanding',
             'you are stupid': 'you have a different understanding',
-            'you are dumb': 'you have a different viewpoint',
-            'you are a fool': 'you have a different way of thinking',
-            'you are a jerk': 'you have a different approach',
-            'you are an asshole': 'you have a different perspective',
-            'you are a retard': 'you have a different way of thinking',
+            'you moron': 'you have a different viewpoint',
+            'you are moron': 'you have a different viewpoint',
             'you are a moron': 'you have a different viewpoint',
-            'you are a dumbass': 'you have a different understanding',
+            'you dumb': 'you have a different approach',
+            'you are dumb': 'you have a different approach',
+            'you are a dumb': 'you have a different approach',
+            'you fool': 'you have a different way of thinking',
+            'you are fool': 'you have a different way of thinking',
+            'you are a fool': 'you have a different way of thinking',
             
             # Profanity phrases with constructive alternatives
             'fuck you': 'I disagree with your perspective',
@@ -291,6 +291,14 @@ class ToxicClassifier:
                 'replacement': 'move'
             }
         }
+        
+        # Context patterns for direct insults
+        self.insult_patterns = [
+            (['you'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+            (['you', 'are'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+            (['you', 'are', 'a'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+            (['you', 'are', 'an'], ['idiot', 'stupid', 'moron', 'dumb', 'fool'])
+        ]
 
     def save_checkpoint(self, epoch, optimizer, loss, is_best=False):
         checkpoint = {
@@ -323,74 +331,96 @@ class ToxicClassifier:
             print(f"Error in text preprocessing: {str(e)}")
             return ""
 
-    def classify_toxicity(self, text):
-        """Classify text toxicity"""
+    def classify_text(self, text):
+        """Classify text with improved handling of direct insults and constructive language"""
         try:
-            # Validate input
-            if not text or not isinstance(text, str) or len(text.strip()) < 3:
-                return 'error', [0.33, 0.33, 0.33]
-            
-            # Preprocess the text
-            text = self.preprocess_text(text)
-            
-            # Skip if text is too short after preprocessing
-            if len(text.strip()) < 3:
-                return 'error', [0.33, 0.33, 0.33]
-            
-            # Check for simple greetings or common non-toxic phrases
-            simple_greetings = ['hi', 'hello', 'hey', 'hii', 'good morning', 'good afternoon', 'good evening']
-            if text.lower() in simple_greetings:
-                return 'low', [0.8, 0.1, 0.1]
-            
-            # Check for common non-toxic phrases
-            non_toxic_phrases = [
-                'thank you', 'thanks', 'please', 'excuse me', 'sorry',
-                'i appreciate', 'i understand', 'i agree', 'i see',
-                'that makes sense', 'good point', 'interesting',
-                'i think', 'in my opinion', 'from my perspective'
-            ]
-            if any(phrase in text.lower() for phrase in non_toxic_phrases):
-                return 'low', [0.7, 0.2, 0.1]
-            
             # Tokenize and prepare input
-            encoding = self.tokenizer.encode_plus(
+            inputs = self.tokenizer(
                 text,
-                add_special_tokens=True,
-                max_length=128,
-                return_token_type_ids=False,
-                padding='max_length',
+                padding=True,
                 truncation=True,
-                return_attention_mask=True,
+                max_length=512,
                 return_tensors='pt'
             )
-
-            # Move input to device
-            input_ids = encoding['input_ids'].to(self.device)
-            attention_mask = encoding['attention_mask'].to(self.device)
-
-            # Get prediction
+            
+            # Move inputs to device
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            # Get model predictions
             with torch.no_grad():
-                outputs = self.model(input_ids, attention_mask=attention_mask)
-                predictions = torch.softmax(outputs.logits, dim=1)
-                probabilities = [float(p) for p in predictions[0].tolist()]
-
-            # Define thresholds for toxicity levels
-            high_threshold = 0.35    # Lower threshold for high toxicity
-            moderate_threshold = 0.25 # Lower threshold for moderate toxicity
+                outputs = self.model(**inputs)
+                logits = outputs.logits
+                probabilities = torch.softmax(logits, dim=1)
             
-            # Determine toxicity level based on probabilities
-            if probabilities[2] >= high_threshold:  # High toxicity
-                level = 'high'
-            elif probabilities[1] >= moderate_threshold or probabilities[2] >= 0.2:  # Moderate toxicity
-                level = 'moderate'
-            else:  # Low toxicity
-                level = 'low'
+            # Get predicted class and confidence
+            predicted_class = torch.argmax(probabilities, dim=1).item()
+            confidence = probabilities[0][predicted_class].item()
             
-            return level, probabilities
+            # Check for direct insults
+            text_lower = text.lower()
+            words = text_lower.split()
+            
+            # List of direct insult patterns
+            direct_insult_patterns = [
+                (['you'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+                (['you', 'are'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+                (['you', 'are', 'a'], ['idiot', 'stupid', 'moron', 'dumb', 'fool']),
+                (['you', 'are', 'an'], ['idiot', 'stupid', 'moron', 'dumb', 'fool'])
+            ]
+            
+            # Check for direct insults
+            has_direct_insult = False
+            for pattern in direct_insult_patterns:
+                prefix, insults = pattern
+                if len(words) >= len(prefix) + 1:
+                    if words[:len(prefix)] == prefix and words[len(prefix)] in insults:
+                        has_direct_insult = True
+                        break
+            
+            # Adjust classification based on direct insults
+            if has_direct_insult:
+                # If there's a direct insult, classify as toxic regardless of model confidence
+                predicted_class = 2  # Toxic class
+                confidence = max(confidence, 0.8)  # Ensure high confidence for direct insults
+            
+            # Check for constructive language patterns
+            constructive_patterns = [
+                'have a different perspective',
+                'have a different understanding',
+                'have a different viewpoint',
+                'have a different approach',
+                'have a different way of thinking'
+            ]
+            
+            # Check for constructive language
+            has_constructive_language = any(pattern in text_lower for pattern in constructive_patterns)
+            
+            # Adjust classification for constructive language
+            if has_constructive_language and predicted_class == 2:  # If model predicted toxic
+                # If there's constructive language, reduce confidence in toxic classification
+                confidence = max(0.3, confidence - 0.3)
+                if confidence < 0.5:  # If confidence is too low, switch to non-toxic
+                    predicted_class = 1  # Non-toxic class
+            
+            # Map predicted class to label
+            class_labels = {0: 'neutral', 1: 'non-toxic', 2: 'toxic'}
+            predicted_label = class_labels[predicted_class]
+            
+            return {
+                'label': predicted_label,
+                'confidence': confidence,
+                'has_direct_insult': has_direct_insult,
+                'has_constructive_language': has_constructive_language
+            }
             
         except Exception as e:
-            print(f"Error in classification: {str(e)}")
-            return 'error', [0.33, 0.33, 0.33]
+            print(f"Error in text classification: {str(e)}")
+            return {
+                'label': 'error',
+                'confidence': 0.0,
+                'has_direct_insult': False,
+                'has_constructive_language': False
+            }
 
     def learn_counterfactual_patterns(self, texts, labels):
         """Learn patterns from the dataset for counterfactual generation"""
@@ -439,12 +469,26 @@ class ToxicClassifier:
         """Generate counterfactual text with improved context awareness"""
         try:
             # First check for exact phrase matches
+            text_lower = text.lower()
             for phrase, replacement in self.phrase_mappings.items():
-                if phrase in text.lower():
+                if phrase in text_lower:
                     return {
-                        'text': text.lower().replace(phrase, replacement),
+                        'text': text_lower.replace(phrase, replacement),
                         'changes': [f"{phrase} -> {replacement}"]
                     }
+            
+            # Check for direct insult patterns
+            words = text_lower.split()
+            for pattern in self.insult_patterns:
+                prefix, insults = pattern
+                if len(words) >= len(prefix) + 1:
+                    if words[:len(prefix)] == prefix and words[len(prefix)] in insults:
+                        insult = words[len(prefix)]
+                        replacement = self.semantic_mappings.get(insult, 'person with a different perspective')
+                        return {
+                            'text': ' '.join(prefix + [replacement] + words[len(prefix)+1:]),
+                            'changes': [f"{insult} -> {replacement}"]
+                        }
             
             # Tokenize the text while preserving punctuation
             words = text.split()
@@ -479,7 +523,7 @@ class ToxicClassifier:
                         replacement = self.semantic_mappings[word_lower]
                         # Add context-aware modifications
                         if 'person' in replacement or 'individual' in replacement:
-                            replacement = 'someone with a different perspective'
+                            replacement = 'have a different perspective'
                         elif 'incorrect' in replacement:
                             replacement = 'have a different understanding'
                 
@@ -657,7 +701,7 @@ class ToxicClassifier:
                 return None
             
             # Get base prediction
-            toxicity_level, probabilities = self.classify_toxicity(text)
+            toxicity_level, probabilities = self.classify_text(text)
             
             # Generate LIME explanation with reduced perturbations
             def predict_proba(texts):
@@ -666,7 +710,7 @@ class ToxicClassifier:
                     if not t or len(t.strip()) < 3:  # Skip empty or too short texts
                         results.append([0.33, 0.33, 0.33])
                         continue
-                    _, probs = self.classify_toxicity(t)
+                    _, probs = self.classify_text(t)
                     results.append(probs)
                 return np.array(results)
             
@@ -779,13 +823,13 @@ class ToxicClassifier:
         """Analyze text and generate counterfactual with explanation"""
         try:
             # Classify toxicity
-            toxicity_level, probabilities = self.classify_toxicity(text)
+            toxicity_level, probabilities = self.classify_text(text)
             
             # Generate counterfactual
             counterfactual_result = self.generate_counterfactual(text)
             
             # Classify counterfactual toxicity
-            counterfactual_level, counterfactual_probs = self.classify_toxicity(counterfactual_result['text'])
+            counterfactual_level, counterfactual_probs = self.classify_text(counterfactual_result['text'])
             
             return {
                 'text': text,
