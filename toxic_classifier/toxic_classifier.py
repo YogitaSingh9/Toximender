@@ -79,28 +79,6 @@ class ToxicClassifier:
         
         # Enhanced semantic mappings with context awareness
         self.semantic_mappings = {
-            # Emotional states and anger
-            'mad': 'upset',
-            'angry': 'upset',
-            'furious': 'upset',
-            'enraged': 'upset',
-            'irate': 'upset',
-            'livid': 'upset',
-            'outraged': 'upset',
-            'fuming': 'upset',
-            'seething': 'upset',
-            'raging': 'upset',
-            'pissed': 'upset',
-            'pissed off': 'upset',
-            'infuriated': 'upset',
-            'incensed': 'upset',
-            'wrathful': 'upset',
-            'indignant': 'upset',
-            'resentful': 'upset',
-            'bitter': 'upset',
-            'hostile': 'upset',
-            'aggressive': 'assertive',
-            
             # Personal attacks and insults
             'idiot': 'person with a different perspective',
             'stupid': 'person with a different understanding',
@@ -130,6 +108,28 @@ class ToxicClassifier:
             'dumbfound': 'person',
             'dumbfounder': 'person',
             'dumbfoundest': 'person',
+            
+            # Emotional states and anger
+            'mad': 'upset',
+            'angry': 'upset',
+            'furious': 'upset',
+            'enraged': 'upset',
+            'irate': 'upset',
+            'livid': 'upset',
+            'outraged': 'upset',
+            'fuming': 'upset',
+            'seething': 'upset',
+            'raging': 'upset',
+            'pissed': 'upset',
+            'pissed off': 'upset',
+            'infuriated': 'upset',
+            'incensed': 'upset',
+            'wrathful': 'upset',
+            'indignant': 'upset',
+            'resentful': 'upset',
+            'bitter': 'upset',
+            'hostile': 'upset',
+            'aggressive': 'assertive',
             
             # Profanity and offensive words
             'fuck': 'forget',
@@ -356,9 +356,12 @@ class ToxicClassifier:
             predicted_class = torch.argmax(probabilities, dim=1).item()
             confidence = probabilities[0][predicted_class].item()
             
-            # Check for direct insults
+            # Check for direct insults and individual toxic words
             text_lower = text.lower()
             words = text_lower.split()
+            
+            # Check for individual toxic words in semantic_mappings
+            has_toxic_word = any(word in self.semantic_mappings for word in words)
             
             # List of direct insult patterns
             direct_insult_patterns = [
@@ -377,30 +380,13 @@ class ToxicClassifier:
                         has_direct_insult = True
                         break
             
-            # Adjust classification based on direct insults
-            if has_direct_insult:
-                # If there's a direct insult, classify as toxic regardless of model confidence
-                predicted_class = 2  # Toxic class
-                confidence = max(confidence, 0.8)  # Ensure high confidence for direct insults
-            
-            # Check for constructive language patterns
-            constructive_patterns = [
-                'have a different perspective',
-                'have a different understanding',
-                'have a different viewpoint',
-                'have a different approach',
-                'have a different way of thinking'
-            ]
-            
-            # Check for constructive language
-            has_constructive_language = any(pattern in text_lower for pattern in constructive_patterns)
-            
-            # Adjust classification for constructive language
-            if has_constructive_language and predicted_class == 2:  # If model predicted toxic
-                # If there's constructive language, reduce confidence in toxic classification
-                confidence = max(0.3, confidence - 0.3)
-                if confidence < 0.5:  # If confidence is too low, switch to non-toxic
-                    predicted_class = 1  # Non-toxic class
+            # Adjust classification based on direct insults or toxic words
+            if has_direct_insult or has_toxic_word:
+                # If there's a direct insult or toxic word, classify as toxic
+                return {
+                    'label': 'toxic',
+                    'confidence': max(confidence, 0.8)  # Ensure high confidence for toxic content
+                }
             
             # Map predicted class to label
             class_labels = {0: 'neutral', 1: 'non-toxic', 2: 'toxic'}
@@ -408,18 +394,14 @@ class ToxicClassifier:
             
             return {
                 'label': predicted_label,
-                'confidence': confidence,
-                'has_direct_insult': has_direct_insult,
-                'has_constructive_language': has_constructive_language
+                'confidence': confidence
             }
             
         except Exception as e:
             print(f"Error in text classification: {str(e)}")
             return {
                 'label': 'error',
-                'confidence': 0.0,
-                'has_direct_insult': False,
-                'has_constructive_language': False
+                'confidence': 0.0
             }
 
     def learn_counterfactual_patterns(self, texts, labels):
@@ -468,8 +450,10 @@ class ToxicClassifier:
     def generate_counterfactual(self, text):
         """Generate counterfactual text with improved context awareness"""
         try:
-            # First check for exact phrase matches
+            # Convert to lowercase for matching
             text_lower = text.lower()
+            
+            # First check for exact phrase matches
             for phrase, replacement in self.phrase_mappings.items():
                 if phrase in text_lower:
                     return {
@@ -477,78 +461,27 @@ class ToxicClassifier:
                         'changes': [f"{phrase} -> {replacement}"]
                     }
             
-            # Check for direct insult patterns
+            # Check for individual toxic words
             words = text_lower.split()
-            for pattern in self.insult_patterns:
-                prefix, insults = pattern
-                if len(words) >= len(prefix) + 1:
-                    if words[:len(prefix)] == prefix and words[len(prefix)] in insults:
-                        insult = words[len(prefix)]
-                        replacement = self.semantic_mappings.get(insult, 'person with a different perspective')
-                        return {
-                            'text': ' '.join(prefix + [replacement] + words[len(prefix)+1:]),
-                            'changes': [f"{insult} -> {replacement}"]
-                        }
-            
-            # Tokenize the text while preserving punctuation
-            words = text.split()
-            result = []
             changes = []
+            modified_text = text_lower
             
-            for i, word in enumerate(words):
-                # Remove punctuation for comparison but store it
-                punctuation = ''
-                if word[-1] in '!,.?':
-                    punctuation = word[-1]
-                    word = word[:-1]
-                
-                # Convert to lowercase for comparison but preserve original case
-                word_lower = word.lower()
-                
-                # Check if the word is being used as an insult
-                is_insult = False
-                if word_lower in self.semantic_mappings:
-                    # Check context - if it's being used to address someone
-                    if i > 0 and words[i-1].lower() in ['you', 'your', 'youre', 'you\'re']:
-                        is_insult = True
-                    # Check if it's a direct address
-                    elif i == 0 and len(words) > 1 and words[1].lower() in ['are', 'were', 'was', 'is']:
-                        is_insult = True
-                
-                # Get replacement based on context
-                replacement = None
-                if is_insult:
-                    # Use more neutral replacements for insults
-                    if word_lower in self.semantic_mappings:
-                        replacement = self.semantic_mappings[word_lower]
-                        # Add context-aware modifications
-                        if 'person' in replacement or 'individual' in replacement:
-                            replacement = 'have a different perspective'
-                        elif 'incorrect' in replacement:
-                            replacement = 'have a different understanding'
-                
-                if replacement:
-                    # Preserve original capitalization
-                    if word[0].isupper():
-                        replacement = replacement.capitalize()
-                    # Add back punctuation
-                    replacement += punctuation
-                    result.append(replacement)
-                    changes.append(f"{word}{punctuation} -> {replacement}")
-                else:
-                    # Add back punctuation to original word
-                    result.append(word + punctuation)
+            for word in words:
+                if word in self.semantic_mappings:
+                    replacement = self.semantic_mappings[word]
+                    modified_text = modified_text.replace(word, replacement)
+                    changes.append(f"{word} -> {replacement}")
             
-            # Join words back into text
-            counterfactual = ' '.join(result)
+            if changes:
+                return {
+                    'text': modified_text,
+                    'changes': changes
+                }
             
-            # Post-processing
-            counterfactual = re.sub(r'\s+([.,!?])', r'\1', counterfactual)
-            counterfactual = re.sub(r'\s+', ' ', counterfactual)
-            
+            # If no toxic content found, return original text
             return {
-                'text': counterfactual,
-                'changes': changes
+                'text': text,
+                'changes': []
             }
             
         except Exception as e:
@@ -820,38 +753,52 @@ class ToxicClassifier:
             return None
 
     def analyze_text(self, text):
-        """Analyze text and generate counterfactual with explanation"""
         try:
-            # Classify toxicity
-            toxicity_level, probabilities = self.classify_text(text)
+            # Preprocess the text
+            processed_text = self.preprocess_text(text)
             
-            # Generate counterfactual
-            counterfactual_result = self.generate_counterfactual(text)
+            # Classify the text
+            result = self.classify_text(processed_text)
             
-            # Classify counterfactual toxicity
-            counterfactual_level, counterfactual_probs = self.classify_text(counterfactual_result['text'])
+            # Extract toxicity level and probabilities
+            toxicity_level = result['label']
+            confidence = result['confidence']
+            
+            # Map the label to our expected levels
+            if toxicity_level == 'toxic':
+                level = 'high'
+            elif toxicity_level == 'non-toxic':
+                level = 'low'
+            else:
+                level = 'moderate'
+            
+            # Generate counterfactual if the text is toxic or contains toxic words
+            counterfactual = None
+            if level in ['high', 'moderate'] or any(word in self.semantic_mappings for word in processed_text.lower().split()):
+                cf_result = self.generate_counterfactual(processed_text)
+                if isinstance(cf_result, dict):
+                    counterfactual = cf_result.get('text', None)
+                else:
+                    counterfactual = cf_result
             
             return {
                 'text': text,
-                'counterfact': counterfactual_result['text'],
-                'counterfactual': {
-                    'changes': counterfactual_result['changes'],
-                    'text': counterfactual_result['text']
-                },
                 'toxicity_analysis': {
-                    'level': toxicity_level,
-                    'probabilities': probabilities
-                }
+                    'level': level,
+                    'probabilities': [confidence, 0.0, 0.0]  # [low, moderate, high]
+                },
+                'counterfact': counterfactual,
+                'counterfactual': counterfactual
             }
             
         except Exception as e:
             print(f"Error in text analysis: {str(e)}")
             return {
                 'text': text,
-                'counterfact': None,
-                'counterfactual': None,
                 'toxicity_analysis': {
                     'level': 'error',
                     'probabilities': [0.33, 0.33, 0.33]
-                }
+                },
+                'counterfact': None,
+                'counterfactual': None
             } 

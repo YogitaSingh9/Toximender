@@ -113,7 +113,9 @@ def main():
         print("\nTesting the classifier with example texts:")
         test_results = []
         for text in test_texts:
-            toxicity_level, probabilities = classifier.classify_toxicity(text)
+            result = classifier.classify_text(text)
+            toxicity_level = result['label']
+            probabilities = [result['confidence'], 0.0, 0.0]  # Adjust based on your actual output
             print(f"\nText: {text}")
             print(f"Toxicity level: {toxicity_level}")
             print(f"Probabilities: {probabilities}")
@@ -123,7 +125,9 @@ def main():
             print(f"Counterfactual: {counterfactual}")
             
             # Classify the counterfactual
-            counter_level, counter_probs = classifier.classify_toxicity(counterfactual['text'])
+            counter_result = classifier.classify_text(counterfactual['text'])
+            counter_level = counter_result['label']
+            counter_probs = [counter_result['confidence'], 0.0, 0.0]  # Adjust based on your actual output
             print(f"Counterfactual toxicity level: {counter_level}")
             
             test_results.append({

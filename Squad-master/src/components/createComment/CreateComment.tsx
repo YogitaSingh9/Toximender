@@ -17,6 +17,7 @@ const CreateComment: React.FC<CreateCommentType> = ({ postID }) => {
     if (auth.currentUser) {
       try {
         await onAddComment(postID, comment, setComment);
+        setComment('');
       } catch (error) {
         alert('Failed to add comment. Please try again.');
       }
